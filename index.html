@@ -374,6 +374,7 @@
   .btn-hapus { background: #dc2626; }
   .btn-export { background: #0e7490; }
   .btn-import { background: #4338ca; }
+  .btn-cloudload { background: #0284c7; }
   .btn-ground1 { background: #ca8a04; }
   .btn-ground2 { background: #a16207; }
   .btn-ground3 { background: #854d0e; }
@@ -616,6 +617,7 @@
       <button class="btn btn-export" id="exportBtn">💾 Export</button>
       <button class="btn btn-import" id="importBtn">📂 Import</button>
       <input type="file" id="importFileInput" accept="application/json" style="display:none;">
+      <button class="btn btn-cloudload" id="cloudLoadBtn">🌐 Muat Online</button>
       <button class="btn btn-customadd" id="addCustomItemBtn">+</button>
       <input type="file" id="customItemFileInput" accept="image/*" style="display:none;">
       <select class="btn btn-charskin" id="charSkinSelect" title="Pilih jenis karakter">
@@ -986,30 +988,33 @@
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  function applySceneData(data) {
+    if (!data || !Array.isArray(data.objects)) throw new Error("invalid");
+    const expandedObjects = expandAssetRefs(data.objects, data.assets);
+    objects = expandedObjects.map((o) => {
+      const merged = Object.assign({ locked: false, dy: 0, scale: 1, zIndex: 0, isBg: false, solid: true, depth: "mid" }, o);
+      if (!merged.solidSides) merged.solidSides = { top: !!merged.solid, right: false, bottom: false, left: false };
+      return merged;
+    });
+    if (Array.isArray(data.groundPoints) && data.groundPoints.length > 1) groundPoints = data.groundPoints;
+    if (typeof data.nextId === "number") nextId = data.nextId; else nextId = objects.length + 1;
+    customButtons = Array.isArray(data.customButtons) ? expandAssetRefs(data.customButtons, data.assets) : [];
+    nextCustomId = typeof data.nextCustomId === "number" ? data.nextCustomId : (customButtons.length + 1);
+    importMonsters(Array.isArray(data.monsters) ? data.monsters : []);
+    nextMonsterId = typeof data.nextMonsterId === "number" ? data.nextMonsterId : (monsters.length + 1);
+    selectedId = null;
+    Object.keys(objectElPool).forEach((id) => destroyObjectEl(id));
+    redrawGround();
+    syncAllObjectElements();
+    syncGroundHandles();
+    renderCustomButtons();
+  }
   function importStateFromFile(file) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
-        if (!data || !Array.isArray(data.objects)) throw new Error("invalid");
-        const expandedObjects = expandAssetRefs(data.objects, data.assets);
-        objects = expandedObjects.map((o) => {
-        const merged = Object.assign({ locked: false, dy: 0, scale: 1, zIndex: 0, isBg: false, solid: true, depth: "mid" }, o);
-        if (!merged.solidSides) merged.solidSides = { top: !!merged.solid, right: false, bottom: false, left: false };
-        return merged;
-      });
-        if (Array.isArray(data.groundPoints) && data.groundPoints.length > 1) groundPoints = data.groundPoints;
-        if (typeof data.nextId === "number") nextId = data.nextId; else nextId = objects.length + 1;
-        customButtons = Array.isArray(data.customButtons) ? expandAssetRefs(data.customButtons, data.assets) : [];
-        nextCustomId = typeof data.nextCustomId === "number" ? data.nextCustomId : (customButtons.length + 1);
-        importMonsters(Array.isArray(data.monsters) ? data.monsters : []);
-        nextMonsterId = typeof data.nextMonsterId === "number" ? data.nextMonsterId : (monsters.length + 1);
-        selectedId = null;
-        Object.keys(objectElPool).forEach((id) => destroyObjectEl(id));
-        redrawGround();
-        syncAllObjectElements();
-        syncGroundHandles();
-        renderCustomButtons();
+        applySceneData(data);
         saveState();
         if (typeof showToast === "function") showToast("Berhasil memuat file scene!", true);
       } catch (err) {
@@ -1019,6 +1024,45 @@
     reader.readAsText(file);
   }
   const restoredFromStorage = loadState();
+
+  // ---------- Muat map "resmi" dari file JSON yang di-hosting bareng
+  // index.html ini (misalnya di GitHub Pages). Ini WAJIB dipakai kalau mau
+  // semua orang yang buka link GitHub Pages-nya langsung lihat map yang sama,
+  // karena localStorage itu sifatnya per-browser/per-HP — hasil export yang
+  // cuma diupload ke repo TIDAK otomatis kebaca kalau tidak ada kode yang
+  // secara eksplisit fetch() file itu. Nama file harus PERSIS sama dengan
+  // yang ada di repo (default: endless-desert-scene-data.json, satu folder
+  // sama dengan index.html).
+  const REMOTE_SCENE_URL = "endless-desert-scene-data.json";
+  function loadSceneFromUrl(url, opts) {
+    const silent = opts && opts.silent;
+    return fetch(url, { cache: "no-store" })
+      .then((res) => {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then((data) => {
+        applySceneData(data);
+        saveState();
+        if (typeof showToast === "function") showToast("Map online berhasil dimuat!", true);
+        return true;
+      })
+      .catch((err) => {
+        if (!silent && typeof showToast === "function") {
+          showToast("Gagal memuat map online (cek nama file & pastikan sudah di-push ke GitHub).", true);
+        }
+        console.warn("loadSceneFromUrl gagal:", err);
+        return false;
+      });
+  }
+  // Auto-load sekali di kunjungan pertama (localStorage masih kosong) supaya
+  // pemain baru langsung lihat map yang sudah kamu susun & upload ke GitHub.
+  // Kalau localStorage SUDAH ada isinya (berarti browser ini pernah dipakai
+  // untuk edit sebelumnya), kita tidak menimpanya otomatis — pakai tombol
+  // "🌐 Muat Online" kalau memang mau paksa ambil ulang versi dari GitHub.
+  if (!restoredFromStorage) {
+    loadSceneFromUrl(REMOTE_SCENE_URL, { silent: true });
+  }
 
   // ---------- Background removal (custom photo upload) ----------
   function removeBackground(imageEl, callback) {
@@ -1139,6 +1183,7 @@
   const exportBtn = document.getElementById("exportBtn");
   const importBtn = document.getElementById("importBtn");
   const importFileInput = document.getElementById("importFileInput");
+  const cloudLoadBtn = document.getElementById("cloudLoadBtn");
   const addCustomItemBtn = document.getElementById("addCustomItemBtn");
   const customItemFileInput = document.getElementById("customItemFileInput");
   const addCharBtn = document.getElementById("addCharBtn");
@@ -3463,6 +3508,11 @@
     e.target.value = "";
   });
 
+  cloudLoadBtn.addEventListener("click", () => {
+    showToast("Memuat map online…", true);
+    loadSceneFromUrl(REMOTE_SCENE_URL);
+  });
+
   // ---------- Custom photo upload ----------
   addPhotoBtn.addEventListener("click", () => { armFullscreenRestore(); fileInput.click(); });
 
@@ -3727,14 +3777,11 @@
     fbReady = false;
   }
 
-  // ID unik per-TAB (bukan per-device): dipakai sessionStorage supaya kalau
-  // kamu buka 2 tab di browser yang sama (misal buat testing mabar sendiri),
-  // masing-masing dianggap pemain berbeda oleh Firebase — bukan numpuk jadi
-  // satu node yang sama seperti kalau pakai localStorage.
-  let myId = sessionStorage.getItem("lobbyPlayerId");
+  // ID unik per-device, dibikin sekali dan disimpan biar konsisten tiap sesi.
+  let myId = localStorage.getItem("lobbyPlayerId");
   if (!myId) {
     myId = "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    sessionStorage.setItem("lobbyPlayerId", myId);
+    localStorage.setItem("lobbyPlayerId", myId);
   }
 
   let roomCode = null;
@@ -3870,9 +3917,6 @@
 
   lobbyPlayerName.addEventListener("change", () => {
     localStorage.setItem("lobbyPlayerName", lobbyPlayerName.value.trim() || "Kamu");
-    if (playersRef) playersRef.child(myId).update({ name: myName() });
-  });
-  lobbyPlayerName.addEventListener("input", () => {
     if (playersRef) playersRef.child(myId).update({ name: myName() });
   });
 
