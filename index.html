@@ -103,6 +103,27 @@
   .lobby-player .lobby-name { color: #fff; font-size: 11px; font-weight: 600; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
   .lobby-player.empty .lobby-avatar { background: rgba(255,255,255,0.18); border-style: dashed; }
   .lobby-player.empty .lobby-name { opacity: .6; }
+  .lobby-charselect-title {
+    color: #fff; font-size: 13px; font-weight: 700; text-align: center;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.7); margin: 6px 0 2px;
+  }
+  .lobby-charselect { display: flex; gap: 12px; justify-content: center; margin: 4px 0 8px; }
+  .lobby-char-card {
+    width: 108px; background: rgba(245,243,255,0.92); border: 3px solid #7c3aed;
+    border-radius: 12px; padding: 8px 6px 10px; display: flex; flex-direction: column;
+    align-items: center; gap: 6px; cursor: pointer; transition: transform .12s;
+  }
+  .lobby-char-card.selected { border-color: #16a34a; transform: translateY(-2px); }
+  .lobby-char-card .lobby-char-name { font-size: 12px; font-weight: 800; color: #7c3aed; }
+  .lobby-char-card.selected .lobby-char-name { color: #15803d; }
+  .lobby-char-preview { width: 64px; height: 64px; image-rendering: pixelated; background-repeat: no-repeat; }
+  .lobby-char-pick-btn {
+    font-size: 11px; font-weight: 700; padding: 5px 14px; border-radius: 999px;
+    border: 2px solid #7c3aed; background: #e5e0ff; color: #4c1d95;
+  }
+  .lobby-char-card.selected .lobby-char-pick-btn {
+    border-color: #16a34a; background: #dcfce7; color: #15803d;
+  }
   #lobbyStartBtn {
     display: block; margin: 0 auto 22px; padding: 12px 40px; font-size: 15px;
   }
@@ -582,6 +603,19 @@
       <div class="lobby-player empty"><div class="lobby-avatar">👤</div><div class="lobby-name">Menunggu...</div></div>
       <div class="lobby-player empty"><div class="lobby-avatar">👤</div><div class="lobby-name">Menunggu...</div></div>
       <div class="lobby-player empty"><div class="lobby-avatar">👤</div><div class="lobby-name">Menunggu...</div></div>
+    </div>
+    <div class="lobby-charselect-title">Pilih karakter kamu</div>
+    <div class="lobby-charselect" id="lobbyCharSelect">
+      <div class="lobby-char-card" data-skin="warrior_m" id="lobbyCardM">
+        <div class="lobby-char-preview" id="lobbyPreviewM"></div>
+        <div class="lobby-char-name">Pria</div>
+        <button class="lobby-char-pick-btn" type="button">Pilih</button>
+      </div>
+      <div class="lobby-char-card" data-skin="warrior_f" id="lobbyCardF">
+        <div class="lobby-char-preview" id="lobbyPreviewF"></div>
+        <div class="lobby-char-name">Wanita</div>
+        <button class="lobby-char-pick-btn" type="button">Pilih</button>
+      </div>
     </div>
     <button class="menu-btn" id="lobbyStartBtn">Mulai</button>
   </div>
@@ -2741,15 +2775,23 @@
     tryAttack(characters.find((c) => c.id === activeCharacterId));
   });
 
-  addCharBtn.addEventListener("click", () => {
+  // Dipakai baik oleh tombol "+ Karakter" di editor, maupun otomatis
+  // saat pemain menekan "Mulai" di lobby (lihat window.__gameApi di bawah),
+  // supaya karakter langsung muncul begitu masuk game tanpa perlu buka editor.
+  function spawnCharacterWithSkin(skin) {
     const worldX = scroll + sceneEl.clientWidth / 2;
-    const skin = charSkinSelect.value;
     const ch = createCharacter(worldX, skin);
     activeCharacterId = ch.id;
     controlsLayer.classList.add("active");
     activeCharNameEl.textContent = ch.name;
     charHP = charHPMax; charShield = charShieldMax; updateStatusBars();
     syncCharacterElements();
+    return ch;
+  }
+
+  addCharBtn.addEventListener("click", () => {
+    const skin = charSkinSelect.value;
+    const ch = spawnCharacterWithSkin(skin);
     showToast('Karakter baru (' + (CHAR_SKIN_LABELS[ch.skin] || ch.skin) + ') ditambahkan! Sedang mengendalikan "' + ch.name + '". Tap karakter lain buat ganti kendali.', true);
   });
 
@@ -3732,6 +3774,19 @@
   window.addEventListener("pointerdown", firstInteract, { once: true });
   window.addEventListener("touchstart", firstInteract, { once: true });
   window.addEventListener("keydown", firstInteract, { once: true });
+
+  // ---------- API kecil buat dipakai skrip lobby (di bawah), supaya lobby
+  // bisa (1) spawn karakter otomatis pakai skin yg dipilih di lobby, dan
+  // (2) ambil preview sprite tiap skin buat kartu pilih karakter. ----------
+  window.__gameApi = {
+    spawnCharacterWithSkin: spawnCharacterWithSkin,
+    hasActiveCharacter: function() { return !!activeCharacterId; },
+    getSkinPreview: function(skin) {
+      const def = CHAR_SKINS[skin];
+      if (!def || !def.idle) return null;
+      return { src: def.idle.src, frameW: def.idle.frameW, frameH: def.idle.frameH };
+    }
+  };
 })();
 </script>
 <!-- Firebase (compat build, biar bisa dipakai langsung tanpa bundler/import) -->
@@ -3750,6 +3805,46 @@
   const lobbyPlayerName = document.getElementById("lobbyPlayerName");
   const lobbyPlayersWrap = document.getElementById("lobbyPlayers");
   const lobbyStartBtn = document.getElementById("lobbyStartBtn");
+
+  // ---------- Pilih karakter di lobby (Pria/Wanita) ----------
+  const lobbyCharCards = Array.from(document.querySelectorAll(".lobby-char-card"));
+  let lobbySelectedSkin = localStorage.getItem("lobbySelectedSkin") || "warrior_m";
+
+  function renderCharPreviews() {
+    lobbyCharCards.forEach((card) => {
+      const skin = card.getAttribute("data-skin");
+      const previewEl = card.querySelector(".lobby-char-preview");
+      const info = window.__gameApi && window.__gameApi.getSkinPreview(skin);
+      if (info && previewEl) {
+        // Tampilkan hanya frame pertama dari sprite sheet idle, di-scale
+        // supaya konsisten ukurannya di kartu (64px tinggi).
+        const scale = 64 / info.frameH;
+        previewEl.style.backgroundImage = "url('" + info.src + "')";
+        previewEl.style.backgroundSize = (info.frameW * scale) + "px " + (info.frameH * scale) + "px";
+        previewEl.style.width = (info.frameW * scale) + "px";
+        previewEl.style.height = (info.frameH * scale) + "px";
+      }
+    });
+  }
+
+  function setLobbySelectedSkin(skin) {
+    lobbySelectedSkin = skin;
+    localStorage.setItem("lobbySelectedSkin", skin);
+    lobbyCharCards.forEach((card) => {
+      card.classList.toggle("selected", card.getAttribute("data-skin") === skin);
+    });
+    const skinSelect = document.getElementById("charSkinSelect");
+    if (skinSelect) skinSelect.value = skin;
+  }
+
+  lobbyCharCards.forEach((card) => {
+    card.addEventListener("click", () => setLobbySelectedSkin(card.getAttribute("data-skin")));
+  });
+
+  // Sprite baru siap dipakai begitu skrip utama (di atas) selesai jalan,
+  // jadi render preview & pilihan default dilakukan setelah DOM ready.
+  renderCharPreviews();
+  setLobbySelectedSkin(lobbySelectedSkin);
 
   // ---------- Firebase: koneksi real ke Realtime Database ----------
   // Ini yang bikin fitur mabar-nya beneran online: setiap device yang join
@@ -3997,6 +4092,19 @@
     menuOverlay.classList.add("hidden");
     window.dispatchEvent(new Event("pointerdown"));
     startMultiplayerSync();
+
+    // Langsung masuk mode main yang bersih (bukan tampilan editor):
+    // sembunyikan toolbar edit, cuma sisakan analog/loncat/serangan +
+    // tombol 👁️ (yang selalu tetap kelihatan biar gampang balik ke editor).
+    document.body.classList.add("view-mode");
+    const vmBtn = document.getElementById("viewModeBtn");
+    if (vmBtn) { vmBtn.classList.add("active"); vmBtn.textContent = "🙈"; }
+
+    // Spawn karakter otomatis pakai skin yang dipilih di lobby, kalau
+    // belum ada karakter yang aktif (baru pertama kali masuk).
+    if (window.__gameApi && !window.__gameApi.hasActiveCharacter()) {
+      window.__gameApi.spawnCharacterWithSkin(lobbySelectedSkin);
+    }
   });
 
   window.addEventListener("beforeunload", () => { leaveRoom(); });
