@@ -501,9 +501,18 @@
     pointer-events: auto; touch-action: none; will-change: transform;
   }
   .char-name-tag {
-    position: absolute; top: -16px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: -30px; left: 50%; transform: translateX(-50%);
     font-size: 9px; background: rgba(0,0,0,0.6); color: #fff;
     padding: 1px 6px; border-radius: 6px; white-space: nowrap; pointer-events: none;
+  }
+  /* HP teman/pemain lain, tampil di atas kepala tiap karakter (mirip HP monster) */
+  .char-hp-bar {
+    position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+    width: 34px; height: 5px; background: rgba(0,0,0,0.5);
+    border-radius: 3px; overflow: hidden; pointer-events: none;
+  }
+  .char-hp-fill {
+    height: 100%; background: linear-gradient(#4ade80, #16a34a);
   }
   .char-sprite {
     position: absolute; bottom: 0; left: 50%;
@@ -629,7 +638,53 @@
   }
   #shieldBar .stat-bar-label { font-size: 8.5px; }
 
+  /* ---------- Daftar urutan pemain (mabar), di bawah bar HP/Shield ---------- */
+  #playerOrderBar {
+    position: absolute; top: 56px; left: 8px; width: 200px;
+    display: none; flex-direction: column; gap: 4px;
+    pointer-events: none; z-index: 41;
+  }
+  #playerOrderBar.show { display: flex; }
+  .player-order-row {
+    background: rgba(17,24,39,0.75); border-radius: 6px; padding: 3px 7px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  }
+  .player-order-row.me { outline: 1px solid #fbbf24; }
+  .player-order-name {
+    font-size: 10px; font-weight: 700; color: #fff;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.7); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .player-order-hpbar {
+    margin-top: 2px; width: 100%; height: 7px; background: #374151;
+    border-radius: 4px; overflow: hidden;
+  }
+  .player-order-hpfill {
+    height: 100%; background: linear-gradient(#4ade80, #16a34a); width: 100%;
+    transition: width 0.2s ease-out;
+  }
+
   #fileInput { display: none; }
+
+  /* ---------- Popup konfirmasi kembali ke lobby ---------- */
+  .confirm-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+    display: none; align-items: center; justify-content: center; z-index: 3000;
+  }
+  .confirm-overlay.show { display: flex; }
+  .confirm-box {
+    background: #1f2937; border-radius: 14px; padding: 20px; max-width: 280px;
+    width: 84vw; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  }
+  .confirm-title { font-size: 15px; font-weight: 800; color: #fff; margin-bottom: 8px; }
+  .confirm-msg { color: #d1d5db; font-size: 13px; margin-bottom: 16px; line-height: 1.4; }
+  .confirm-btns { display: flex; gap: 10px; }
+  .confirm-btns button {
+    flex: 1; padding: 11px; border-radius: 9px; border: none; color: #fff;
+    font-weight: 800; font-size: 13px;
+  }
+  #confirmLobbyYes { background: #dc2626; }
+  #confirmLobbyNo { background: #4b5563; }
 </style>
 </head>
 <body>
@@ -799,6 +854,7 @@
           <div class="stat-bar-label" id="shieldLabel">50/50</div>
         </div>
       </div>
+      <div id="playerOrderBar"></div>
       <div id="charSwitchHint">Mengendalikan: <span id="activeCharName">-</span></div>
       <div id="joystickZone"><div id="joystickKnob"></div></div>
       <div id="jumpBtn"><img id="jumpBtnIcon" src="" alt="" draggable="false"></div>
@@ -817,8 +873,20 @@
         <button id="ctrlPosToggleBtn" type="button">✋ Geser Posisi Tombol</button>
         <button id="ctrlPosResetBtn" type="button">↺ Reset Posisi</button>
         <button id="ctrlEditModeBtn" type="button">🔓 Buka Mode Edit</button>
+        <button id="ctrlBackToLobbyBtn" type="button" style="background:#b91c1c;">🚪 Kembali ke Lobby</button>
         <button id="ctrlSettingsCloseBtn" type="button">Tutup</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div id="confirmLobbyOverlay" class="confirm-overlay">
+  <div class="confirm-box">
+    <div class="confirm-title">Kembali ke Lobby?</div>
+    <div class="confirm-msg">Kamu akan keluar dari sesi mabar ini dan balik ke menu lobby.</div>
+    <div class="confirm-btns">
+      <button id="confirmLobbyYes" type="button">YAKIN</button>
+      <button id="confirmLobbyNo" type="button">TIDAK</button>
     </div>
   </div>
 </div>
@@ -2543,6 +2611,9 @@
       x: worldX, vx: 0, footY: spawnFootY, vy: 0, jumpCount: 0, onGround: true,
       facing: 1, state: "idle", attackT: 0,
       animKey: "idle", animTime: 0,
+      // HP ditampilkan di atas kepala karakter (juga dipakai buat kirim status
+      // darah ke teman mabar lewat Firebase). Default penuh saat baru dibuat.
+      hp: charHPMax, hpMax: charHPMax,
       // Checkpoint used to respawn the character if it falls off the bottom of
       // the screen (no solid ground caught it). Updated every time it's grounded.
       checkpointX: worldX, checkpointFootY: spawnFootY
@@ -2744,6 +2815,15 @@
         }
         return;
       }
+      // Selalu sinkronkan hp yang ditampilkan di atas kepala dengan HP aktif
+      // (karakter yang sedang dikendalikan pakai charHP global; karakter lain
+      // yang belum pernah diambil alih tetap dianggap penuh).
+      if (ch.id === activeCharacterId) {
+        ch.hp = charHP; ch.hpMax = charHPMax;
+      } else if (ch.hp == null) {
+        ch.hp = charHPMax; ch.hpMax = charHPMax;
+      }
+
       const isAttacking = ch.attackT > 0;
       // Lock horizontal movement while attacking so "spam attack + walk" can't be
       // used to dodge everything while swinging — the character commits to the swing.
@@ -2893,6 +2973,7 @@
     wrap.dataset.charId = ch.id;
     wrap.innerHTML =
       '<div class="char-name-tag"></div>' +
+      '<div class="char-hp-bar"><div class="char-hp-fill"></div></div>' +
       '<div class="char-sprite"></div>';
     wrap.addEventListener("pointerdown", (e) => {
       e.stopPropagation();
@@ -2905,7 +2986,8 @@
     const entry = {
       wrap,
       sprite: wrap.querySelector(".char-sprite"),
-      nameTag: wrap.querySelector(".char-name-tag")
+      nameTag: wrap.querySelector(".char-name-tag"),
+      hpFill: wrap.querySelector(".char-hp-fill")
     };
     characterElPool[ch.id] = entry;
     return entry;
@@ -2920,6 +3002,11 @@
     entry.wrap.dataset.state = ch.state;
     entry.wrap.classList.toggle("active", ch.id === activeCharacterId);
     entry.nameTag.textContent = ch.name + (ch.id === activeCharacterId ? " 🎮" : "");
+    if (entry.hpFill) {
+      const hpMaxV = ch.hpMax > 0 ? ch.hpMax : 100;
+      const hpValV = Math.max(0, Math.min(hpMaxV, ch.hp != null ? ch.hp : hpMaxV));
+      entry.hpFill.style.width = ((hpValV / hpMaxV) * 100) + "%";
+    }
 
     const skinAnims = CHAR_SKINS[ch.skin] || CHAR_SKINS[DEFAULT_SKIN];
     const anim = skinAnims[ch.animKey] || skinAnims.idle;
@@ -3957,6 +4044,10 @@
     characterElPool,
     CHAR_SKINS,
     DEFAULT_SKIN,
+    showToast,
+    getHighestSurfaceAt,
+    get charHP() { return charHP; },
+    get charHPMax() { return charHPMax; },
     removeCharacterById(id) {
       const idx = characters.findIndex((c) => c.id === id);
       if (idx >= 0) characters.splice(idx, 1);
@@ -4162,6 +4253,17 @@
     });
   }
 
+  // Kalau Firebase menolak baca/tulis (paling sering gara-gara Rules di
+  // Firebase Console belum di-set untuk izinkan read/write), errornya
+  // sebelumnya cuma nongol di console (ga kelihatan di HP). Sekarang
+  // ditampilin sebagai toast di layar biar ketahuan penyebabnya.
+  function mpWarn(context, err) {
+    console.warn("[Mabar] " + context + ":", err);
+    const mp = window.__mp;
+    const msg = "⚠️ Gagal sinkron mabar (" + context + "): " + (err && err.message ? err.message : err);
+    if (mp && mp.showToast) mp.showToast(msg, true);
+  }
+
   function leaveRoom() {
     if (playersRef) {
       playersRef.child(myId).onDisconnect().cancel();
@@ -4174,6 +4276,8 @@
       delete remotePlayers[pid];
     });
     roomRef = null; playersRef = null; roomCode = null; inGame = false; isOnlineRoom = false;
+    lastPlayersSnapshot = {};
+    if (playerOrderBarEl) playerOrderBarEl.classList.remove("show");
   }
 
   function joinRoom(code) {
@@ -4186,13 +4290,14 @@
     playersRef.child(myId).set({
       name: myName(),
       joinedAt: firebase.database.ServerValue.TIMESTAMP
-    });
+    }).catch((err) => mpWarn("gabung room", err));
     playersRef.child(myId).onDisconnect().remove();
     playersRef.on("value", (snap) => {
       const playersObj = snap.val() || {};
       renderLobbyPlayers(playersObj);
+      renderPlayerOrderBar(playersObj);
       if (inGame) reconcileRemotePlayers(playersObj);
-    });
+    }, (err) => mpWarn("baca data room", err));
   }
 
   // ---------- Sinkron karakter saat game sudah dimulai ----------
@@ -4205,20 +4310,28 @@
       const p = playersObj[pid];
       if (!p || !p.char) return;
       seen.add(pid);
+      // Jaga-jaga kalau ada field yang belum lengkap/rusak (misal NaN) —
+      // dulu ini bisa bikin karakter teman gagal ke-render sama sekali.
+      const safeX = (typeof p.char.x === "number" && isFinite(p.char.x)) ? p.char.x : 0;
+      const safeFootY = (typeof p.char.footY === "number" && isFinite(p.char.footY))
+        ? p.char.footY
+        : (mp.getHighestSurfaceAt ? mp.getHighestSurfaceAt(safeX) : 0);
       let charId = remotePlayers[pid];
       let ch = charId ? mp.characters.find((c) => c.id === charId) : null;
       if (!ch) {
-        ch = mp.createCharacter(p.char.x || 0, p.char.skin || mp.DEFAULT_SKIN);
+        ch = mp.createCharacter(safeX, p.char.skin || mp.DEFAULT_SKIN);
         ch.remote = true;
         remotePlayers[pid] = ch.id;
       }
       ch.name = (p.name || "Teman") + " 🌐";
       ch.skin = mp.CHAR_SKINS[p.char.skin] ? p.char.skin : mp.DEFAULT_SKIN;
-      ch.x = p.char.x;
-      ch.footY = p.char.footY;
+      ch.x = safeX;
+      ch.footY = safeFootY;
       ch.facing = p.char.facing || 1;
       ch.state = p.char.state || "idle";
       ch.animKey = p.char.animKey || "idle";
+      ch.hpMax = (typeof p.char.hpMax === "number" && p.char.hpMax > 0) ? p.char.hpMax : 100;
+      ch.hp = (typeof p.char.hp === "number" && isFinite(p.char.hp)) ? p.char.hp : ch.hpMax;
     });
     Object.keys(remotePlayers).forEach((pid) => {
       if (!seen.has(pid)) {
@@ -4228,25 +4341,37 @@
     });
   }
 
+  function broadcastMyChar() {
+    const mp = window.__mp;
+    if (!mp) return;
+    const ch = mp.characters.find((c) => c.id === mp.activeCharacterId);
+    if (!ch) return;
+    playersRef.child(myId).child("char").set({
+      x: Math.round(ch.x),
+      footY: Math.round(ch.footY),
+      facing: ch.facing,
+      state: ch.state,
+      animKey: ch.animKey,
+      skin: ch.skin,
+      hp: Math.round(ch.hp != null ? ch.hp : 0),
+      hpMax: Math.round(ch.hpMax != null ? ch.hpMax : 100)
+    }).catch((err) => mpWarn("kirim posisi", err));
+  }
+
   function startMultiplayerSync() {
     inGame = true;
     if (!isOnlineRoom || !fbReady || !roomRef) return;
-    playersRef.child(myId).update({ inGame: true });
+    playersRef.child(myId).update({ inGame: true }).catch((err) => mpWarn("update status", err));
+    // Ambil snapshot sekali begitu masuk game — kalau teman sudah lebih
+    // dulu online, karakternya langsung muncul tanpa nunggu update berikutnya.
+    playersRef.once("value").then((snap) => {
+      const playersObj = snap.val() || {};
+      reconcileRemotePlayers(playersObj);
+      renderPlayerOrderBar(playersObj);
+    }).catch((err) => mpWarn("ambil data awal", err));
     if (broadcastTimer) clearInterval(broadcastTimer);
-    broadcastTimer = setInterval(() => {
-      const mp = window.__mp;
-      if (!mp) return;
-      const ch = mp.characters.find((c) => c.id === mp.activeCharacterId);
-      if (!ch) return;
-      playersRef.child(myId).child("char").set({
-        x: Math.round(ch.x),
-        footY: Math.round(ch.footY),
-        facing: ch.facing,
-        state: ch.state,
-        animKey: ch.animKey,
-        skin: ch.skin
-      });
-    }, 200);
+    broadcastMyChar(); // kirim posisi sendiri langsung, ga usah nunggu interval pertama
+    broadcastTimer = setInterval(broadcastMyChar, 200);
   }
 
   function genCode() {
@@ -4365,7 +4490,90 @@
     }
   });
 
+  // ---------- Bar urutan pemain (nomor + HP), tampil di bawah bar HP/Shield ----------
+  const playerOrderBarEl = document.getElementById("playerOrderBar");
+  let lastPlayersSnapshot = {};
+
+  function renderPlayerOrderBar(playersObj) {
+    lastPlayersSnapshot = playersObj || {};
+    if (!inGame || !isOnlineRoom) {
+      playerOrderBarEl.classList.remove("show");
+      return;
+    }
+    const mp = window.__mp;
+    // Urutan tetap sesuai urutan gabung ke lobby (joinedAt), sama di semua device.
+    const ordered = Object.keys(lastPlayersSnapshot)
+      .filter((pid) => lastPlayersSnapshot[pid])
+      .sort((a, b) => (lastPlayersSnapshot[a].joinedAt || 0) - (lastPlayersSnapshot[b].joinedAt || 0));
+    if (ordered.length === 0) {
+      playerOrderBarEl.classList.remove("show");
+      return;
+    }
+    playerOrderBarEl.classList.add("show");
+    playerOrderBarEl.innerHTML = ordered.map((pid, i) => {
+      const p = lastPlayersSnapshot[pid];
+      const isMe = pid === myId;
+      const name = isMe ? myName() : (p.name || "Pemain");
+      let hp, hpMax;
+      if (isMe && mp) {
+        hp = mp.charHP; hpMax = mp.charHPMax;
+      } else {
+        hpMax = (p.char && typeof p.char.hpMax === "number" && p.char.hpMax > 0) ? p.char.hpMax : 100;
+        hp = (p.char && typeof p.char.hp === "number") ? p.char.hp : hpMax;
+      }
+      hpMax = hpMax > 0 ? hpMax : 100;
+      hp = Math.max(0, Math.min(hpMax, hp));
+      const pct = Math.round((hp / hpMax) * 100);
+      return '<div class="player-order-row' + (isMe ? ' me' : '') + '">' +
+        '<div class="player-order-name">' + (i + 1) + '. ' + escapeHtml(name) + '</div>' +
+        '<div class="player-order-hpbar"><div class="player-order-hpfill" style="width:' + pct + '%;"></div></div>' +
+        '</div>';
+    }).join("");
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // Refresh HP kolom kita sendiri tiap 300ms selagi main, biar bar HP di daftar
+  // ikut turun real-time walau belum ada perubahan data dari Firebase.
+  setInterval(() => {
+    if (inGame && isOnlineRoom) renderPlayerOrderBar(lastPlayersSnapshot);
+  }, 300);
+
   window.addEventListener("beforeunload", () => { leaveRoom(); });
+
+  // ---------- Tombol "Kembali ke Lobby" (dari panel ⚙️ saat lagi main) ----------
+  const ctrlBackToLobbyBtn = document.getElementById("ctrlBackToLobbyBtn");
+  const confirmLobbyOverlay = document.getElementById("confirmLobbyOverlay");
+  const confirmLobbyYes = document.getElementById("confirmLobbyYes");
+  const confirmLobbyNo = document.getElementById("confirmLobbyNo");
+  const ctrlSettingsPanelEl = document.getElementById("ctrlSettingsPanel");
+
+  function backToLobbyNow() {
+    leaveRoom();
+    document.body.classList.remove("view-mode");
+    const vmBtn = document.getElementById("viewModeBtn");
+    if (vmBtn) { vmBtn.classList.remove("active"); vmBtn.textContent = "👁️"; }
+    const controlsLayerEl = document.getElementById("controlsLayer");
+    if (controlsLayerEl) controlsLayerEl.classList.remove("active");
+    confirmLobbyOverlay.classList.remove("show");
+    menuOverlay.classList.remove("hidden");
+    showScreen(mainMenuScreen);
+  }
+
+  if (ctrlBackToLobbyBtn) {
+    ctrlBackToLobbyBtn.addEventListener("click", () => {
+      if (ctrlSettingsPanelEl) ctrlSettingsPanelEl.classList.remove("open");
+      confirmLobbyOverlay.classList.add("show");
+    });
+  }
+  if (confirmLobbyYes) confirmLobbyYes.addEventListener("click", backToLobbyNow);
+  if (confirmLobbyNo) {
+    confirmLobbyNo.addEventListener("click", () => {
+      confirmLobbyOverlay.classList.remove("show");
+    });
+  }
 })();
 </script>
 </body>
