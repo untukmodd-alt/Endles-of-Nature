@@ -552,7 +552,8 @@
     position: absolute; left: 16px; bottom: 16px; width: 100px; height: 100px;
     border-radius: 50%; background: rgba(255,255,255,0.15); border: 2px solid rgba(255,255,255,0.45);
     touch-action: none; pointer-events: auto;
-    transform: scale(var(--ctrl-scale)); transform-origin: bottom left;
+    --btn-scale: 1;
+    transform: scale(calc(var(--ctrl-scale) * var(--btn-scale))); transform-origin: bottom left;
     opacity: var(--ctrl-opacity);
   }
   #joystickKnob {
@@ -568,7 +569,8 @@
     background: transparent; border: none;
     display: flex; align-items: center; justify-content: center;
     touch-action: none; pointer-events: auto; user-select: none;
-    transform: scale(var(--ctrl-scale)); transform-origin: bottom right;
+    --btn-scale: 1;
+    transform: scale(calc(var(--ctrl-scale) * var(--btn-scale))); transform-origin: bottom right;
     opacity: var(--ctrl-opacity);
   }
   #attackBtn { right: 16px; }
@@ -598,7 +600,8 @@
     background: transparent; border: none;
     display: none; align-items: center; justify-content: center;
     touch-action: none; pointer-events: auto; user-select: none;
-    transform: scale(var(--ctrl-scale)); transform-origin: bottom right;
+    --btn-scale: 1;
+    transform: scale(calc(var(--ctrl-scale) * var(--btn-scale))); transform-origin: bottom right;
     opacity: var(--ctrl-opacity);
   }
   #skillBtn.show { display: flex; }
@@ -618,6 +621,19 @@
     outline: 2px dashed rgba(255,255,255,0.85); outline-offset: 3px; cursor: grab;
   }
   #controlsLayer.pos-edit #skillBtn.dragging { cursor: grabbing; outline-color: #22c55e; }
+
+  /* Tombol mini "−"/"+" buat ngubah ukuran SATU tombol doang (bukan semua),
+     cuma nongol pas mode "Geser Posisi Tombol" aktif. */
+  .btn-resize-mini {
+    display: none; position: absolute; top: -9px; width: 22px; height: 22px;
+    border-radius: 50%; background: rgba(17,24,39,0.85); color: #fff;
+    border: 1px solid rgba(255,255,255,0.7); font-size: 14px; font-weight: 800;
+    line-height: 20px; text-align: center; padding: 0; z-index: 6;
+    pointer-events: auto; touch-action: none;
+  }
+  #controlsLayer.pos-edit .btn-resize-mini { display: block; }
+  .btn-resize-minus { left: -9px; }
+  .btn-resize-plus { right: -9px; }
   #ctrlSettingsBtn {
     position: absolute; left: 16px; bottom: 128px; width: 34px; height: 34px;
     border-radius: 50%; border: 2px solid rgba(255,255,255,0.5);
@@ -730,6 +746,7 @@
     <div class="menu-side">
       <button class="menu-btn" id="menuJoinBtn">Join</button>
       <button class="menu-btn" id="menuInviteBtn">Invite</button>
+      <button class="menu-btn" id="menuServerBtn" style="background:#0891b2;">🌐 Server</button>
     </div>
     <button class="menu-btn" id="mainMenuStartBtn">Mulai</button>
   </div>
@@ -892,10 +909,22 @@
       </div>
       <div id="playerOrderBar"></div>
       <div id="charSwitchHint">Mengendalikan: <span id="activeCharName">-</span></div>
-      <div id="joystickZone"><div id="joystickKnob"></div></div>
-      <div id="jumpBtn"><img id="jumpBtnIcon" src="" alt="" draggable="false"></div>
-      <div id="attackBtn"><img id="attackBtnIcon" src="" alt="" draggable="false"></div>
-      <div id="skillBtn"><img id="skillBtnIcon" src="" alt="" draggable="false"><div id="skillBtnCooldown"></div></div>
+      <div id="joystickZone"><div id="joystickKnob"></div>
+        <button type="button" class="btn-resize-mini btn-resize-minus" data-target="joystickZone">−</button>
+        <button type="button" class="btn-resize-mini btn-resize-plus" data-target="joystickZone">+</button>
+      </div>
+      <div id="jumpBtn"><img id="jumpBtnIcon" src="" alt="" draggable="false">
+        <button type="button" class="btn-resize-mini btn-resize-minus" data-target="jumpBtn">−</button>
+        <button type="button" class="btn-resize-mini btn-resize-plus" data-target="jumpBtn">+</button>
+      </div>
+      <div id="attackBtn"><img id="attackBtnIcon" src="" alt="" draggable="false">
+        <button type="button" class="btn-resize-mini btn-resize-minus" data-target="attackBtn">−</button>
+        <button type="button" class="btn-resize-mini btn-resize-plus" data-target="attackBtn">+</button>
+      </div>
+      <div id="skillBtn"><img id="skillBtnIcon" src="" alt="" draggable="false"><div id="skillBtnCooldown"></div>
+        <button type="button" class="btn-resize-mini btn-resize-minus" data-target="skillBtn">−</button>
+        <button type="button" class="btn-resize-mini btn-resize-plus" data-target="skillBtn">+</button>
+      </div>
       <button id="ctrlSettingsBtn" title="Atur ukuran & transparansi tombol">⚙️</button>
       <div id="ctrlSettingsPanel">
         <div class="ctrl-settings-title">⚙️ Atur Tombol</div>
@@ -908,7 +937,7 @@
           <input type="range" id="ctrlOpacityRange" min="30" max="100" step="5">
         </label>
         <button id="ctrlPosToggleBtn" type="button">✋ Geser Posisi Tombol</button>
-        <button id="ctrlPosResetBtn" type="button">↺ Reset Posisi</button>
+        <button id="ctrlPosResetBtn" type="button">↺ Reset Posisi & Ukuran</button>
         <button id="ctrlEditModeBtn" type="button">🔓 Buka Mode Edit</button>
         <button id="ctrlBackToLobbyBtn" type="button" style="background:#b91c1c;">🚪 Kembali ke Lobby</button>
         <button id="ctrlSettingsCloseBtn" type="button">Tutup</button>
@@ -1572,7 +1601,9 @@
     DRAGGABLE_CTRL_IDS.forEach((id) => {
       const el = document.getElementById(id);
       const pos = map[id];
-      if (el && pos) {
+      if (!el) return;
+      el.style.setProperty("--btn-scale", (pos && pos.scale) || 1);
+      if (pos) {
         el.style.left = pos.left + "px";
         el.style.top = pos.top + "px";
         el.style.right = "auto";
@@ -1588,9 +1619,23 @@
         el.style.top = "";
         el.style.right = "";
         el.style.bottom = "";
+        el.style.removeProperty("--btn-scale");
       }
     });
     saveCtrlPositions({});
+  }
+  // Ukuran SATU tombol doang (dari tombol mini "−"/"+"), disimpan bareng
+  // posisi tombol itu (bukan lewat slider "Ukuran" di panel ⚙️ yang
+  // ngegedein SEMUA tombol sekaligus).
+  function adjustBtnScale(id, delta) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const cur = (ctrlPositions[id] && ctrlPositions[id].scale) || 1;
+    let next = Math.round((cur + delta) * 100) / 100;
+    next = Math.max(0.5, Math.min(2, next));
+    el.style.setProperty("--btn-scale", next);
+    ctrlPositions[id] = Object.assign({}, ctrlPositions[id], { scale: next });
+    saveCtrlPositions(ctrlPositions);
   }
   let ctrlPositions = loadCtrlPositions();
   applyCtrlPositions(ctrlPositions);
@@ -1600,6 +1645,7 @@
     if (!el) return;
     el.addEventListener("pointerdown", (e) => {
       if (!posEditMode) return;
+      if (e.target.closest && e.target.closest(".btn-resize-mini")) return; // biar tombol +/- bisa dipencet, ga malah nge-drag
       e.stopPropagation();
       e.stopImmediatePropagation();
       const elRect = el.getBoundingClientRect();
@@ -1637,6 +1683,16 @@
     el.addEventListener("pointercancel", endDrag, true);
   }
   DRAGGABLE_CTRL_IDS.forEach((id) => setupDraggable(document.getElementById(id)));
+
+  document.querySelectorAll(".btn-resize-mini").forEach((btn) => {
+    btn.addEventListener("pointerdown", (e) => e.stopPropagation());
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.target;
+      const delta = btn.classList.contains("btn-resize-plus") ? 0.1 : -0.1;
+      adjustBtnScale(id, delta);
+    });
+  });
 
   const ctrlPosToggleBtn = document.getElementById("ctrlPosToggleBtn");
   const ctrlPosResetBtn = document.getElementById("ctrlPosResetBtn");
@@ -2865,31 +2921,36 @@
   // Efek visual tebasan sabit — nempel di characterLayer (jadi otomatis ikut
   // gerak kamera bareng karakternya), dibalik kalau karakter lagi menghadap
   // kiri. Framenya di-"putar" dari yang tipis sampai penuh biar keliatan
-  // membentuk (bukan cuma nongol diam), terus hilang begitu animasinya kelar.
+  // membentuk (bukan cuma nongol diam) — dan sengaja ditahan lebih lama di
+  // frame-frame besar/penuh di akhir supaya skill-nya kelihatan jelas,
+  // bukan cuma kelebat sekilas.
+  const SKILL1_FRAME_HOLD_MS = [40, 45, 55, 70, 110, 260]; // makin ke akhir makin lama ditahan
   function spawnSkill1Effect(ch) {
     const img = document.createElement("img");
     img.className = "skill1-effect";
-    const size = 130; // lebih kecil dari sebelumnya (220) biar ga kegedean
+    const size = 190;
     img.style.position = "absolute";
     img.style.width = size + "px";
     img.style.height = "auto";
-    img.style.left = (ch.x - size * 0.18) + "px";
-    img.style.bottom = (ch.footY + CHAR_H * 0.12) + "px"; // lebih rendah, deket badan bukan di atas kepala
+    img.style.left = (ch.x - size * 0.22) + "px";
+    img.style.bottom = (ch.footY + CHAR_H * 0.22) + "px"; // sejajar dada/tangan, ga terlalu tinggi ga terlalu rendah
     img.style.transform = "scaleX(" + ch.facing + ")";
     img.style.transformOrigin = "center";
     img.style.pointerEvents = "none";
     img.src = ASSET_SKILL1_FRAMES[0];
     characterLayer.appendChild(img);
 
-    const frameCount = ASSET_SKILL1_FRAMES.length;
-    const frameMs = SKILL1_MS / frameCount;
     let frame = 0;
-    const frameTimer = setInterval(() => {
+    let totalMs = 0;
+    function nextFrame() {
       frame++;
-      if (frame >= frameCount) { clearInterval(frameTimer); return; }
+      if (frame >= ASSET_SKILL1_FRAMES.length) { img.remove(); return; }
       img.src = ASSET_SKILL1_FRAMES[frame];
-    }, frameMs);
-    setTimeout(() => { clearInterval(frameTimer); img.remove(); }, SKILL1_MS + 80);
+      const hold = SKILL1_FRAME_HOLD_MS[frame] || 60;
+      totalMs += hold;
+      setTimeout(nextFrame, hold);
+    }
+    setTimeout(nextFrame, SKILL1_FRAME_HOLD_MS[0]);
   }
 
   // Matches "chekpoint", "checkpoint", and numbered variants like "chekpoint 2"
@@ -4456,11 +4517,17 @@
     if (playerOrderBarEl) playerOrderBarEl.classList.remove("show");
   }
 
+  // Buat "🌐 Server" — semua orang yang pencet tombol ini otomatis masuk ke
+  // room yang SAMA (kode tetap), jadi ga perlu tukeran kode kayak Invite/Join.
+  const GLOBAL_ROOM_CODE = "SERVER-UTAMA";
+  let knownPlayerIds = null; // null = belum pernah nampung snapshot sama sekali
+
   function joinRoom(code) {
     if (!fbReady) return;
     if (roomCode === code) return; // sudah di room ini
     leaveRoom();
     roomCode = code;
+    knownPlayerIds = null;
     roomRef = db.ref("rooms/" + code);
     playersRef = roomRef.child("players");
     playersRef.child(myId).set({
@@ -4470,10 +4537,39 @@
     playersRef.child(myId).onDisconnect().remove();
     playersRef.on("value", (snap) => {
       const playersObj = snap.val() || {};
+      announceJoinLeave(playersObj);
       renderLobbyPlayers(playersObj);
       renderPlayerOrderBar(playersObj);
       if (inGame) reconcileRemotePlayers(playersObj);
     }, (err) => mpWarn("baca data room", err));
+  }
+
+  // Nunjukin toast "X telah bergabung" / "X telah keluar" tiap ada perubahan
+  // pemain di room — dibandingin sama snapshot SEBELUMNYA biar cuma yang
+  // baru gabung/keluar aja yang di-toast (bukan semua orang tiap update).
+  function announceJoinLeave(playersObj) {
+    const mp = window.__mp;
+    const currentIds = new Set(Object.keys(playersObj));
+    if (knownPlayerIds === null) {
+      // Snapshot pertama kali kita lihat room ini — jangan nge-toast semua
+      // orang yang udah lebih dulu di sana, cuma catat siapa aja yang ada.
+      knownPlayerIds = currentIds;
+      return;
+    }
+    currentIds.forEach((pid) => {
+      if (pid === myId) return;
+      if (!knownPlayerIds.has(pid)) {
+        const name = (playersObj[pid] && playersObj[pid].name) || "Pemain";
+        if (mp && mp.showToast) mp.showToast("🌐 " + name + " telah bergabung", true);
+      }
+    });
+    knownPlayerIds.forEach((pid) => {
+      if (pid === myId) return;
+      if (!currentIds.has(pid)) {
+        if (mp && mp.showToast) mp.showToast("🌐 Seorang pemain telah keluar", true);
+      }
+    });
+    knownPlayerIds = currentIds;
   }
 
   // ---------- Sinkron karakter saat game sudah dimulai ----------
@@ -4637,6 +4733,16 @@
     if (code === null) return;
     openLobby(code.trim() || genCode(), true);
   });
+
+  // "🌐 Server" — auto-konek ke room bersama TANPA perlu tukeran kode. Semua
+  // orang yang pencet tombol ini dari device manapun bakal ketemu di room
+  // yang sama (GLOBAL_ROOM_CODE tetap/statis).
+  const menuServerBtn = document.getElementById("menuServerBtn");
+  if (menuServerBtn) {
+    menuServerBtn.addEventListener("click", () => {
+      openLobby(GLOBAL_ROOM_CODE, true);
+    });
+  }
 
   document.getElementById("lobbyBackBtn").addEventListener("click", () => {
     leaveRoom();
