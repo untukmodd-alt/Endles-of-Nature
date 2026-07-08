@@ -3004,9 +3004,21 @@
         // bukan lompat-lompat tiap ada update baru (update jaringan cuma
         // dikirim tiap ~200ms, jauh lebih jarang dari 60 frame/detik lokal).
         if (typeof ch.targetX === "number") {
-          const lerpT = Math.min(1, dt * REMOTE_LERP_RATE);
-          ch.x += (ch.targetX - ch.x) * lerpT;
-          ch.footY += (ch.targetFootY - ch.footY) * lerpT;
+          // Interpolasi LINEAR antara titik jaringan sebelumnya (netPrevX/Y)
+          // dan titik terbaru (targetX/Y), selama netIntervalMs (jarak waktu
+          // asli antar update yang diterima) — bukan exponential lerp ke satu
+          // target. Exponential lerp bikin pola "gerak cepat pas data baru
+          // masuk -> melambat/berhenti -> lompat lagi" tiap ~80ms, yang
+          // keliatan sebagai patah-patah, apalagi kalau delay jaringan gak
+          // rata. Interpolasi linear antar 2 titik = gerakan kecepatan
+          // konstan, jauh lebih mulus buat gerak jalan MAUPUN loncat.
+          const interval = ch.netIntervalMs || 90;
+          ch.netInterpMs = Math.min(interval, (ch.netInterpMs || 0) + dt * 1000);
+          const t = interval > 0 ? ch.netInterpMs / interval : 1;
+          const fromX = (typeof ch.netPrevX === "number") ? ch.netPrevX : ch.targetX;
+          const fromFootY = (typeof ch.netPrevFootY === "number") ? ch.netPrevFootY : ch.targetFootY;
+          ch.x = fromX + (ch.targetX - fromX) * t;
+          ch.footY = fromFootY + (ch.targetFootY - fromFootY) * t;
         }
         if (ch.animKey !== ch._prevAnimKey) {
           ch._prevAnimKey = ch.animKey;
@@ -3242,7 +3254,15 @@
     const anim = skinAnims[ch.animKey] || skinAnims.idle;
     let frameIndex;
     if (ch.animKey === "attack") {
-      const p = ch.skill1T > 0 ? (1 - ch.skill1T / SKILL1_MS) : (1 - ch.attackT / ATTACK_MS);
+      // Karakter remote (teman via jaringan) TIDAK punya attackT/skill1T yang
+      // jalan (fisikanya di-skip, lihat updateCharacters), jadi kalau dihitung
+      // pakai attackT/skill1T hasilnya selalu "1" (macet di frame terakhir) —
+      // itu penyebab serangan teman keliatan patah/nyangkut. Buat remote,
+      // hitung progress dari animTime dibagi durasi yang dikirim lewat
+      // jaringan (attackDurMs), sama seperti animasi lain yang non-attack.
+      const p = ch.remote
+        ? (ch.animTime / (ch.attackDurMs || ATTACK_MS))
+        : (ch.skill1T > 0 ? (1 - ch.skill1T / SKILL1_MS) : (1 - ch.attackT / ATTACK_MS));
       frameIndex = Math.min(anim.frames - 1, Math.floor(Math.max(0, p) * anim.frames));
     } else if (anim.loop) {
       frameIndex = Math.floor((ch.animTime / 1000) * anim.fps) % anim.frames;
@@ -4302,6 +4322,8 @@
     getHighestSurfaceAt,
     get charHP() { return charHP; },
     get charHPMax() { return charHPMax; },
+    ATTACK_MS,
+    SKILL1_MS,
     removeCharacterById(id) {
       const idx = characters.findIndex((c) => c.id === id);
       if (idx >= 0) characters.splice(idx, 1);
@@ -4625,15 +4647,37 @@
         // langsung. Itu yang bikin gerakan teman kelihatan halus, ga patah².
         ch.targetX = safeX;
         ch.targetFootY = safeFootY;
+        ch.netPrevX = safeX;
+        ch.netPrevFootY = safeFootY;
+        ch.netInterpMs = 0;
+        ch.netIntervalMs = 90;
         remotePlayers[pid] = ch.id;
       }
       ch.name = (p.name || "Teman") + " 🌐";
       ch.skin = mp.CHAR_SKINS[p.char.skin] ? p.char.skin : mp.DEFAULT_SKIN;
+      // Titik "dari" buat interpolasi linear = posisi yang LAGI ditampilin di
+      // layar sekarang (ch.x/ch.footY), bukan target lama — biar ga ada
+      // "loncatan kecil" pas update baru masuk kalau interpolasi sebelumnya
+      // belum kelar. netIntervalMs dihitung dari jarak waktu ASLI antar
+      // update yang diterima (bukan angka tebakan tetap), jadi kalau koneksi
+      // teman lagi ngelag/gak rata, interpolasinya otomatis nyesuaiin —
+      // itu salah satu penyebab loncatan keliatan aneh sebelumnya.
+      const nowMs = Date.now();
+      if (ch.lastNetUpdateAt) {
+        ch.netIntervalMs = Math.max(40, Math.min(400, nowMs - ch.lastNetUpdateAt));
+      }
+      ch.lastNetUpdateAt = nowMs;
+      ch.netPrevX = ch.x;
+      ch.netPrevFootY = ch.footY;
+      ch.netInterpMs = 0;
       ch.targetX = safeX;
       ch.targetFootY = safeFootY;
       ch.facing = p.char.facing || 1;
       ch.state = p.char.state || "idle";
       ch.animKey = p.char.animKey || "idle";
+      ch.attackDurMs = (typeof p.char.attackDurMs === "number" && p.char.attackDurMs > 0)
+        ? p.char.attackDurMs
+        : mp.ATTACK_MS;
       ch.hpMax = (typeof p.char.hpMax === "number" && p.char.hpMax > 0) ? p.char.hpMax : 100;
       ch.hp = (typeof p.char.hp === "number" && isFinite(p.char.hp)) ? p.char.hp : ch.hpMax;
       remoteMissCounter[pid] = 0; // masih keliatan, reset hitungan "ilang"
@@ -4660,12 +4704,17 @@
     if (!mp) return;
     const ch = mp.characters.find((c) => c.id === mp.activeCharacterId);
     if (!ch) return;
+    // attackDurMs: durasi animasi attack yang lagi jalan (beda antara attack
+    // biasa/ATTACK_MS dan skill "Tebasan Sabit"/SKILL1_MS) — dikirim biar
+    // teman lain bisa hitung frame attack dengan benar (lihat updateCharacterEl).
+    const attackDurMs = ch.skill1T > 0 ? mp.SKILL1_MS : mp.ATTACK_MS;
     playersRef.child(myId).child("char").set({
       x: Math.round(ch.x),
       footY: Math.round(ch.footY),
       facing: ch.facing,
       state: ch.state,
       animKey: ch.animKey,
+      attackDurMs: attackDurMs,
       skin: ch.skin,
       hp: Math.round(ch.hp != null ? ch.hp : 0),
       hpMax: Math.round(ch.hpMax != null ? ch.hpMax : 100)
