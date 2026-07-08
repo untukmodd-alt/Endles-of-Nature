@@ -1967,7 +1967,7 @@
   // Seberapa cepat karakter teman (remote) "ngejar" posisi asli dari jaringan.
   // Makin gede makin cepat nyusul (tapi makin gampang keliatan patah lagi
   // kalau koneksi lag); makin kecil makin mulus tapi makin "ngelag" terasa.
-  const REMOTE_LERP_RATE = 10;
+  const REMOTE_LERP_RATE = 14;
 
   const MONSTER_TYPES = {
     brown: {
@@ -4490,6 +4490,7 @@
   let inGame = false;
   let isOnlineRoom = false; // true hanya kalau masuk lewat "Invite"/"Join" (main bareng temen)
   const remotePlayers = {}; // playerId -> characterId lokal yang mewakilinya
+  const remoteMissCounter = {}; // playerId -> berapa kali berturut-turut "ga keliatan" di snapshot
 
   function myName() {
     return (lobbyPlayerName.value || "").trim() || "Kamu";
@@ -4535,6 +4536,7 @@
       if (window.__mp) window.__mp.removeCharacterById(remotePlayers[pid]);
       delete remotePlayers[pid];
     });
+    Object.keys(remoteMissCounter).forEach((pid) => delete remoteMissCounter[pid]);
     roomRef = null; playersRef = null; roomCode = null; inGame = false; isOnlineRoom = false;
     lastPlayersSnapshot = {};
     if (playerOrderBarEl) playerOrderBarEl.classList.remove("show");
@@ -4634,11 +4636,21 @@
       ch.animKey = p.char.animKey || "idle";
       ch.hpMax = (typeof p.char.hpMax === "number" && p.char.hpMax > 0) ? p.char.hpMax : 100;
       ch.hp = (typeof p.char.hp === "number" && isFinite(p.char.hp)) ? p.char.hp : ch.hpMax;
+      remoteMissCounter[pid] = 0; // masih keliatan, reset hitungan "ilang"
     });
+    // Baru beneran dihapus kalau ilang dari snapshot BEBERAPA KALI berturut-turut
+    // (bukan langsung sekali ga keliatan) — soalnya kalau langsung dihapus terus
+    // dibuat ulang tiap ada hiccup kecil di data, karakternya keliatan "kedip"/
+    // patah-patah karena posisi & animasinya ke-reset dari nol tiap kali itu.
+    const REMOTE_MISS_LIMIT = 5;
     Object.keys(remotePlayers).forEach((pid) => {
       if (!seen.has(pid)) {
-        mp.removeCharacterById(remotePlayers[pid]);
-        delete remotePlayers[pid];
+        remoteMissCounter[pid] = (remoteMissCounter[pid] || 0) + 1;
+        if (remoteMissCounter[pid] >= REMOTE_MISS_LIMIT) {
+          mp.removeCharacterById(remotePlayers[pid]);
+          delete remotePlayers[pid];
+          delete remoteMissCounter[pid];
+        }
       }
     });
   }
@@ -4673,7 +4685,7 @@
     }).catch((err) => mpWarn("ambil data awal", err));
     if (broadcastTimer) clearInterval(broadcastTimer);
     broadcastMyChar(); // kirim posisi sendiri langsung, ga usah nunggu interval pertama
-    broadcastTimer = setInterval(broadcastMyChar, 200);
+    broadcastTimer = setInterval(broadcastMyChar, 80);
   }
 
   function genCode() {
