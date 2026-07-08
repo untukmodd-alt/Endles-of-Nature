@@ -1964,6 +1964,10 @@
   const SKILL1_RANGE = 170;            // px — jangkauan lebih jauh dari pukulan biasa
   const SKILL1_DAMAGE = 42;            // damage per monster kena
   const SKILL1_ONLY_SKIN = "warrior_m";
+  // Seberapa cepat karakter teman (remote) "ngejar" posisi asli dari jaringan.
+  // Makin gede makin cepat nyusul (tapi makin gampang keliatan patah lagi
+  // kalau koneksi lag); makin kecil makin mulus tapi makin "ngelag" terasa.
+  const REMOTE_LERP_RATE = 10;
 
   const MONSTER_TYPES = {
     brown: {
@@ -2288,6 +2292,10 @@
         best.deathT = MONSTER_DEATH_FADE_MS;
         best.animKey = "idle";
       }
+      // Kabarin ke temen mabar (kalau lagi online) — generik lewat ID monster,
+      // jadi otomatis kepakai buat jenis monster APAPUN, termasuk yang baru
+      // ditambahin nanti, tanpa perlu kode tambahan lagi.
+      if (window.__worldSync) window.__worldSync.reportMonsterDamage(best.id, PLAYER_ATTACK_DAMAGE, best.hpMax);
     }
   }
 
@@ -2311,6 +2319,7 @@
         m.deathT = MONSTER_DEATH_FADE_MS;
         m.animKey = "idle";
       }
+      if (window.__worldSync) window.__worldSync.reportMonsterDamage(m.id, SKILL1_DAMAGE, m.hpMax);
     }
   }
 
@@ -2362,6 +2371,7 @@
             m.hp = m.hpMax;
             m.bossResetT = 0;
             showToast(m.name + " memulihkan darah penuh (tidak ada pemain di sekitar).", true);
+            if (window.__worldSync) window.__worldSync.reportMonsterFullHeal(m.id, m.hpMax);
           }
         }
       }
@@ -2989,6 +2999,15 @@
       // di-set langsung dari data Firebase, jadi lewati fisika & input lokal di
       // sini — cuma majukan timer animasi biar sprite-nya tetap kelihatan halus.
       if (ch.remote) {
+        // Interpolasi halus menuju posisi terakhir yang dikirim teman lewat
+        // Firebase (targetX/targetFootY) — biar gerakannya keliatan mulus,
+        // bukan lompat-lompat tiap ada update baru (update jaringan cuma
+        // dikirim tiap ~200ms, jauh lebih jarang dari 60 frame/detik lokal).
+        if (typeof ch.targetX === "number") {
+          const lerpT = Math.min(1, dt * REMOTE_LERP_RATE);
+          ch.x += (ch.targetX - ch.x) * lerpT;
+          ch.footY += (ch.targetFootY - ch.footY) * lerpT;
+        }
         if (ch.animKey !== ch._prevAnimKey) {
           ch._prevAnimKey = ch.animKey;
           ch.animTime = 0;
@@ -3112,6 +3131,10 @@
           }
           objects.splice(i, 1);
           destroyObjectEl(o.id);
+          // Kabarin ke temen mabar biar item ini ilang juga di layar mereka —
+          // generik lewat ID objek, jadi otomatis kepakai buat jenis item
+          // apapun yang nanti ditambahin di loop pickup ini, ga cuma hp/shield.
+          if (window.__worldSync) window.__worldSync.reportItemTaken(o.id);
         }
       }
 
@@ -4593,12 +4616,19 @@
       if (!ch) {
         ch = mp.createCharacter(safeX, p.char.skin || mp.DEFAULT_SKIN);
         ch.remote = true;
+        ch.footY = safeFootY;
+        // Posisi "target" dari jaringan — nilai x/footY karakter yang beneran
+        // ditampilin di layar akan NGEJAR nilai ini pelan-pelan tiap frame
+        // (lihat blok interpolasi remote di updateCharacters), bukan lompat
+        // langsung. Itu yang bikin gerakan teman kelihatan halus, ga patah².
+        ch.targetX = safeX;
+        ch.targetFootY = safeFootY;
         remotePlayers[pid] = ch.id;
       }
       ch.name = (p.name || "Teman") + " 🌐";
       ch.skin = mp.CHAR_SKINS[p.char.skin] ? p.char.skin : mp.DEFAULT_SKIN;
-      ch.x = safeX;
-      ch.footY = safeFootY;
+      ch.targetX = safeX;
+      ch.targetFootY = safeFootY;
       ch.facing = p.char.facing || 1;
       ch.state = p.char.state || "idle";
       ch.animKey = p.char.animKey || "idle";
