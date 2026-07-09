@@ -2759,7 +2759,7 @@
       id, name: "Karakter " + (nextCharId - 1),
       skin: resolvedSkin,
       x: worldX, vx: 0, footY: spawnFootY, vy: 0, jumpCount: 0, onGround: true,
-      facing: 1, state: "idle", attackT: 0,
+      facing: 1, state: "idle", attackT: 0, attackSeq: 0,
       animKey: "idle", animTime: 0,
       // HP ditampilkan di atas kepala karakter (juga dipakai buat kirim status
       // darah ke teman mabar lewat Firebase). Default penuh saat baru dibuat.
@@ -2907,6 +2907,10 @@
     if (ch.attackT > 0) return; // already mid-swing — ignore spam taps until it finishes
     ch.attackT = ATTACK_MS;
     ch.attackHitApplied = false;
+    // attackSeq dinaikkan tiap ayunan BARU dimulai — dipakai teman mabar buat
+    // tau ini serangan baru walaupun animKey-nya tetap "attack" terus-menerus
+    // pas spam klik (lihat catatan di updateCharacters, blok remote).
+    ch.attackSeq = (ch.attackSeq || 0) + 1;
   }
 
   // Skill "Tebasan Sabit" — cuma buat karakter cowok (warrior_m). Damage lebih
@@ -2925,6 +2929,7 @@
     ch.skill1T = SKILL1_MS;
     ch.skill1HitApplied = false;
     ch.skill1CooldownT = SKILL1_COOLDOWN_MS;
+    ch.attackSeq = (ch.attackSeq || 0) + 1;
     spawnSkill1Effect(ch);
   }
 
@@ -3020,8 +3025,19 @@
           ch.x = fromX + (ch.targetX - fromX) * t;
           ch.footY = fromFootY + (ch.targetFootY - fromFootY) * t;
         }
-        if (ch.animKey !== ch._prevAnimKey) {
+        // Reset timer animasi kalau animKey ganti (mis. idle -> attack), ATAU
+        // kalau ini SERANGAN BARU walau animKey-nya tetap "attack" terus
+        // (kasus spam klik cepat: jeda "idle" di antara 2 ayunan cuma
+        // berlangsung 1 frame lokal di HP teman, jauh lebih pendek dari jarak
+        // antar update jaringan ~80ms, jadi seringnya KELEWAT dan gak pernah
+        // ke-broadcast — kalau cuma ngandelin animKey berubah, animasi bakal
+        // macet permanen di frame terakhir mulai ayunan ke-2 dst). attackSeq
+        // dinaikkan tiap tryAttack/trySkill1 dipanggil (lihat fungsi itu),
+        // jadi ini caranya tau "ayunan baru" walau animKey sama persis.
+        const isNewAttack = ch.animKey === "attack" && ch.attackSeq !== ch._prevAttackSeq;
+        if (ch.animKey !== ch._prevAnimKey || isNewAttack) {
           ch._prevAnimKey = ch.animKey;
+          ch._prevAttackSeq = ch.attackSeq;
           ch.animTime = 0;
         } else {
           ch.animTime += dt * 1000;
@@ -4678,6 +4694,7 @@
       ch.attackDurMs = (typeof p.char.attackDurMs === "number" && p.char.attackDurMs > 0)
         ? p.char.attackDurMs
         : mp.ATTACK_MS;
+      ch.attackSeq = (typeof p.char.attackSeq === "number") ? p.char.attackSeq : 0;
       ch.hpMax = (typeof p.char.hpMax === "number" && p.char.hpMax > 0) ? p.char.hpMax : 100;
       ch.hp = (typeof p.char.hp === "number" && isFinite(p.char.hp)) ? p.char.hp : ch.hpMax;
       remoteMissCounter[pid] = 0; // masih keliatan, reset hitungan "ilang"
@@ -4698,6 +4715,9 @@
       }
     });
   }
+  // Test hook (read-only, dipakai buat verifikasi otomatis alur multiplayer
+  // tanpa perlu 2 device beneran online) — pola sama kayak window.__sceneTest.
+  window.__mpTest = { reconcileRemotePlayers };
 
   function broadcastMyChar() {
     const mp = window.__mp;
@@ -4715,6 +4735,7 @@
       state: ch.state,
       animKey: ch.animKey,
       attackDurMs: attackDurMs,
+      attackSeq: ch.attackSeq || 0,
       skin: ch.skin,
       hp: Math.round(ch.hp != null ? ch.hp : 0),
       hpMax: Math.round(ch.hpMax != null ? ch.hpMax : 100)
