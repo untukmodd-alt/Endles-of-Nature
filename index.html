@@ -894,6 +894,7 @@
     <div id="decoFrontLayer" style="position:absolute; inset:0; z-index:22; overflow: visible; pointer-events: none;"></div>
     <div id="groundHandleLayer" style="position:absolute; inset:0; z-index:25; overflow: visible; pointer-events:none;"></div>
     <div id="distLabel">Jarak: 0px</div>
+    <div id="buildStamp" style="position:absolute; left:6px; bottom:2px; z-index:999; font-size:10px; color:rgba(255,255,255,0.35); pointer-events:none; font-family:monospace;">build 2026-07-09-attackfix-3</div>
     <div id="toast"></div>
     <div id="editModeBanner">Mode Edit aktif — tap objek untuk atur</div>
     <div id="controlsLayer">
@@ -4340,6 +4341,8 @@
     get charHPMax() { return charHPMax; },
     ATTACK_MS,
     SKILL1_MS,
+    tryAttack,
+    trySkill1,
     removeCharacterById(id) {
       const idx = characters.findIndex((c) => c.id === id);
       if (idx >= 0) characters.splice(idx, 1);
